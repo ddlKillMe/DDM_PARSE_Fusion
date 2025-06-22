@@ -12,7 +12,7 @@ def main():
     input_dir = "./papers"  # Directory containing PDF files
     output_dir = "./markdown"  # Directory for output Markdown files
 
-    # pdf2md.convert_pdfs_to_markdown(input_dir, output_dir)
+    pdf2md.convert_pdfs_to_markdown(input_dir, output_dir)
 
     # Create output directory if it doesn't exist
     os.makedirs("./output", exist_ok=True)

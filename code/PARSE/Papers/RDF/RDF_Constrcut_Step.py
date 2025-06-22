@@ -3,6 +3,7 @@ author: Bowen Zhang
 contact: bowen.zhang1@anu.edu.au
 datetime: 5/2/2023 1:16 am
 """
+
 from datetime import datetime
 import networkx as nx
 import rdflib
@@ -13,13 +14,25 @@ import re
 from urllib.parse import quote
 import requests
 from SPARQLWrapper import SPARQLWrapper, JSON
-from rdflib import Graph, Literal, BNode, Namespace, RDF, URIRef, XSD, OWL, SKOS, DC, RDFS
+from rdflib import (
+    Graph,
+    Literal,
+    BNode,
+    Namespace,
+    RDF,
+    URIRef,
+    XSD,
+    OWL,
+    SKOS,
+    DC,
+    RDFS,
+)
 import nltk
 from nltk.corpus import words
 from nltk.stem import WordNetLemmatizer
 
-nltk.download('words')
-nltk.download('wordnet')
+nltk.download("words")
+nltk.download("wordnet")
 
 word_dictionary = set(words.words())
 lemmatizer = WordNetLemmatizer()
@@ -44,21 +57,26 @@ mode = "ssh"
 
 tnnt_list = []
 if mode == "ssh":
-    json_file = "/home/users/u7274475/askg/anu-scholarly-kg/src/Papers/RDF/ASKG_wiki_dict.json"
+    json_file = (
+        "/home/users/u7274475/askg/anu-scholarly-kg/src/Papers/RDF/ASKG_wiki_dict.json"
+    )
 else:
     json_file = "ASKG_wiki_dict.json"
-with open(json_file, 'r', encoding='utf-8') as file:
+with open(json_file, "r", encoding="utf-8") as file:
     wiki_dict = json.load(file)
+
 
 # blake2s hash function
 def blake2s_hash(input_string, digest_size=7):
-    input_bytes = input_string.encode('utf-8')
+    input_bytes = input_string.encode("utf-8")
     hasher = hashlib.blake2s(digest_size=digest_size)
     hasher.update(input_bytes)
     hash_result = hasher.digest()
     return hash_result.hex()
 
+
 import json
+
 
 def evaluate_graph(step):
 
@@ -103,23 +121,24 @@ def evaluate_graph(step):
         "number_of_connected_components": len(connected_components),
         "information_density": information_density,
         "number_of_triples": triple_count,
-        "number_of_entities": entity_count
+        "number_of_entities": entity_count,
     }
 
     evaluation_results_file = f"/home/users/u7274475/askg/anu-scholarly-kg/src/Papers/RDF/evaluation_results_{step}.json"
     if os.path.exists(evaluation_results_file):
         # If the file exists, load the existing data and update it
-        with open(evaluation_results_file, 'r') as json_file:
+        with open(evaluation_results_file, "r") as json_file:
             existing_data = json.load(json_file)
         existing_data[step] = results
     else:
         # If the file doesn't exist, create a new one
         existing_data = {step: results}
 
-    with open(evaluation_results_file, 'w') as json_file:
+    with open(evaluation_results_file, "w") as json_file:
         json.dump(existing_data, json_file)
 
     # print(f"Evaluation results for {step} saved to evaluation_results.json")
+
 
 # load the paper section location
 def find_located_sec(pos_idx_from, pos_idx_to, paper_id):
@@ -134,10 +153,14 @@ def find_located_sec(pos_idx_from, pos_idx_to, paper_id):
     section_loc = loc_dict.get(paper_id, 0)
     if section_loc != 0:
         for key in section_loc.keys():
-            if pos_idx_from <= section_loc[key][1] and pos_idx_from >= section_loc[key][0]:
+            if (
+                pos_idx_from <= section_loc[key][1]
+                and pos_idx_from >= section_loc[key][0]
+            ):
                 return key
     else:
         return None
+
 
 def is_valid_entity(entity):
     words = entity.split()
@@ -152,15 +175,18 @@ def is_valid_entity(entity):
             return False
     return True
 
+
 def normalize_entity(entity):
     words = entity.split()
     # Lemmatize each word to its base form
     normalized_words = [lemmatizer.lemmatize(word) for word in words]
-    return ' '.join(normalized_words)
+    return " ".join(normalized_words)
 
 
 # construct KG for the paper
-def construct_KG_Excerpt_Academic_Entity(ASKG, excerpt_result, paper_id, section_dict, paper_info):
+def construct_KG_Excerpt_Academic_Entity(
+    ASKG, excerpt_result, paper_id, section_dict, paper_info
+):
     for key in excerpt_result.keys():
         for entity_key in excerpt_result[key]:
             # Skip if entity_key is not valid
@@ -174,11 +200,20 @@ def construct_KG_Excerpt_Academic_Entity(ASKG, excerpt_result, paper_id, section
 
             # construct the academic entity
             if wikidata_ID == "":
-                academic_entity_str = quote(normalize_entity(entity_key.lower().replace(" ", "_")), safe='')
+                academic_entity_str = quote(
+                    normalize_entity(entity_key.lower().replace(" ", "_")), safe=""
+                )
             else:
-                academic_entity_str = quote(normalize_entity(entity_key.lower().replace(" ", "_")),
-                                            safe='') + "-" + wikidata_ID
-            academic_entity = ASKG_namespace_data[f"AcademicEntity-{academic_entity_str}"]
+                academic_entity_str = (
+                    quote(
+                        normalize_entity(entity_key.lower().replace(" ", "_")), safe=""
+                    )
+                    + "-"
+                    + wikidata_ID
+                )
+            academic_entity = ASKG_namespace_data[
+                f"AcademicEntity-{academic_entity_str}"
+            ]
 
             # construct the Wikidata entity
             Wikidata_entity = WIKIDATA_namespace[f"{wikidata_ID}"]
@@ -186,15 +221,33 @@ def construct_KG_Excerpt_Academic_Entity(ASKG, excerpt_result, paper_id, section
                 ltr_wikidata_name = Literal(wikidata_name, lang="en")
                 ASKG.add((Wikidata_entity, RDFS.label, ltr_wikidata_name))
             if (academic_entity, None, None) not in ASKG:
-                ltr_academic_entity_name = Literal(normalize_entity(entity_key.lower()), datatype=XSD.string)
+                ltr_academic_entity_name = Literal(
+                    normalize_entity(entity_key.lower()), datatype=XSD.string
+                )
                 ASKG.add((academic_entity, RDFS.label, ltr_academic_entity_name))
-                if (academic_entity, OWL.sameAs, Wikidata_entity) not in ASKG and wikidata_ID != "":
+                if (
+                    academic_entity,
+                    OWL.sameAs,
+                    Wikidata_entity,
+                ) not in ASKG and wikidata_ID != "":
                     ASKG.add((academic_entity, OWL.sameAs, Wikidata_entity))
 
-            if (academic_entity, SKOS.broader, scientific_type_dict[key.upper()]) not in ASKG:
-                ASKG.add((academic_entity, SKOS.broader, scientific_type_dict[key.upper()]))
-            if (scientific_type_dict[key.upper()], SKOS.narrower, academic_entity) not in ASKG:
-                ASKG.add((scientific_type_dict[key.upper()], SKOS.narrower, academic_entity))
+            if (
+                academic_entity,
+                SKOS.broader,
+                scientific_type_dict[key.upper()],
+            ) not in ASKG:
+                ASKG.add(
+                    (academic_entity, SKOS.broader, scientific_type_dict[key.upper()])
+                )
+            if (
+                scientific_type_dict[key.upper()],
+                SKOS.narrower,
+                academic_entity,
+            ) not in ASKG:
+                ASKG.add(
+                    (scientific_type_dict[key.upper()], SKOS.narrower, academic_entity)
+                )
 
             # construct the excerpt
             for i in range(occur_times):
@@ -206,13 +259,22 @@ def construct_KG_Excerpt_Academic_Entity(ASKG, excerpt_result, paper_id, section
                 sec_loc = find_located_sec(pos_idx_from, pos_idx_to, paper_id)
                 sec = section_dict[sec_loc]
 
-
                 paper_title = paper_info["title"]
-                excerpt_label_str = "Paper-" + f"{[paper_title]}" + " | " + "Section-" + f"{[sec_loc]}" + " | " + "Excerpt-" + f"{[pos_idx_from]}" + "-" + f"{[pos_idx_to]}"
+                excerpt_label_str = (
+                    "Paper-"
+                    + f"{[paper_title]}"
+                    + " | "
+                    + "Section-"
+                    + f"{[sec_loc]}"
+                    + " | "
+                    + "Excerpt-"
+                    + f"{[pos_idx_from]}"
+                    + "-"
+                    + f"{[pos_idx_to]}"
+                )
                 excerpt_label = Literal(excerpt_label_str, lang="en")
                 hashed_excerpt = blake2s_hash(excerpt_label_str)
                 excerpt_entity = ASKG_namespace_data[f"Excerpt-{hashed_excerpt}"]
-
 
                 # ASKG.add((excerpt_entity, RDF.type, excerpt))
                 ASKG.add((sec, rel_contains, excerpt_entity))
@@ -226,6 +288,7 @@ def construct_KG_Excerpt_Academic_Entity(ASKG, excerpt_result, paper_id, section
                 ASKG.add((excerpt_entity, rel_word_idx_to, ltr_pos_idx_to))
                 ASKG.add((excerpt_entity, rel_in_sent, ltr_sentence))
     return ASKG
+
 
 # construct KG for the paper
 def construct_KG_Paper_Abs(ASKG):
@@ -333,6 +396,7 @@ def construct_KG_Paper_Abs(ASKG):
 
     return ASKG
 
+
 def get_paper_info(json_paper_info, paper_id):
     info_paper_id = json_paper_info.get(paper_id, 0)
 
@@ -348,6 +412,7 @@ def get_paper_info(json_paper_info, paper_id):
         year = date_obj.year
         paper_info["time"] = year
     return paper_info
+
 
 # get the section of the paper
 def get_section(key):
@@ -365,6 +430,7 @@ def get_section(key):
         return discussion
     else:
         return "unknown"
+
 
 # get the wikidata entity
 def get_wikidata_entity(keyword):
@@ -394,10 +460,13 @@ def get_wikidata_entity(keyword):
 
             return wikidata_entity_str, wikidata_entity_id
         else:
-            print(f"Error {response.status_code}: Failed to fetch data from Wikidata API")
+            print(
+                f"Error {response.status_code}: Failed to fetch data from Wikidata API"
+            )
             return "None", 0
 
-#this function is used to get the location of the section in the paper
+
+# this function is used to get the location of the section in the paper
 def get_paper_section_loc_char(paper_id):
     result = {}
 
@@ -423,16 +492,25 @@ def find_located_sec_TNNT(pos_idx_from, paper_section_loc_char):
             return key
 
 
-def add_tnnt_ner_result(ASKG, paper_id, input_path_tnnt_result, section_dict, paper_info):
+def add_tnnt_ner_result(
+    ASKG, paper_id, input_path_tnnt_result, section_dict, paper_info
+):
     paper_section_loc_char = get_paper_section_loc_char(paper_id)
     paper_title = paper_info["title"]
 
     if paper_id in tnnt_list:
-        original_path = os.path.join(input_path_tnnt_result, paper_id + ".pdf-MEL+NER_output.json")
+        original_path = os.path.join(
+            input_path_tnnt_result, paper_id + ".pdf-MEL+NER_output.json"
+        )
         with open(original_path, "r") as f:
             json_data = json.load(f)
             NER_result = json_data.get("NLP-NER", "")
-            NER_result = NER_result[0].get('doc-0', "").get('spacy_lg_model', "").get("_output", "")
+            NER_result = (
+                NER_result[0]
+                .get("doc-0", "")
+                .get("spacy_lg_model", "")
+                .get("_output", "")
+            )
             if NER_result != "":
                 for key in NER_result.keys():
                     for item in NER_result.get(key):
@@ -442,30 +520,58 @@ def add_tnnt_ner_result(ASKG, paper_id, input_path_tnnt_result, section_dict, pa
                         pos_idx_to = item.get("end_index")
                         sentence = item.get("sentence")
                         if wikidata_ID == 0:
-                            entity_str = quote(entity_str.replace(" ", "_"), safe='')
+                            entity_str = quote(entity_str.replace(" ", "_"), safe="")
                         else:
-                            entity_str = quote(entity_str.replace(" ", "_"),
-                                                        safe='') + "-" + wikidata_ID
+                            entity_str = (
+                                quote(entity_str.replace(" ", "_"), safe="")
+                                + "-"
+                                + wikidata_ID
+                            )
                         entity = ASKG_namespace_data[f"{key}-{entity_str}"]
 
                         Wikidata_entity = WIKIDATA_namespace[f"{wikidata_ID}"]
-                        if (Wikidata_entity, None, None) not in ASKG and wikidata_ID != 0:
+                        if (
+                            Wikidata_entity,
+                            None,
+                            None,
+                        ) not in ASKG and wikidata_ID != 0:
                             ltr_wikidata_name = Literal(wikidata_str, lang="en")
                             ASKG.add((Wikidata_entity, RDFS.label, ltr_wikidata_name))
                         if (entity, None, None) not in ASKG:
-                            ltr_tnnt_entity_name = Literal(entity_str.lower(), datatype=XSD.string)
+                            ltr_tnnt_entity_name = Literal(
+                                entity_str.lower(), datatype=XSD.string
+                            )
                             ASKG.add((entity, RDFS.label, ltr_tnnt_entity_name))
                             ASKG.add((entity, RDF.type, tnnt_dict[key]))
-                            if (entity, OWL.sameAs, Wikidata_entity) not in ASKG and wikidata_ID != 0:
+                            if (
+                                entity,
+                                OWL.sameAs,
+                                Wikidata_entity,
+                            ) not in ASKG and wikidata_ID != 0:
                                 ASKG.add((entity, OWL.sameAs, Wikidata_entity))
 
-                        loc_sec = find_located_sec_TNNT(pos_idx_from, paper_section_loc_char)
+                        loc_sec = find_located_sec_TNNT(
+                            pos_idx_from, paper_section_loc_char
+                        )
                         sec = section_dict[loc_sec]
 
-                        excerpt_label_str = "Paper-" + f"{[paper_title]}" + " | " + "Section-" + f"{[loc_sec]}" + " | " + "Excerpt-" + f"{[pos_idx_from]}" + "-" + f"{[pos_idx_to]}"
+                        excerpt_label_str = (
+                            "Paper-"
+                            + f"{[paper_title]}"
+                            + " | "
+                            + "Section-"
+                            + f"{[loc_sec]}"
+                            + " | "
+                            + "Excerpt-"
+                            + f"{[pos_idx_from]}"
+                            + "-"
+                            + f"{[pos_idx_to]}"
+                        )
                         excerpt_label = Literal(excerpt_label_str, lang="en")
                         hashed_excerpt = blake2s_hash(excerpt_label_str)
-                        excerpt_entity = ASKG_namespace_data[f"Excerpt-{hashed_excerpt}"]
+                        excerpt_entity = ASKG_namespace_data[
+                            f"Excerpt-{hashed_excerpt}"
+                        ]
 
                         ASKG.add((sec, rel_contains, excerpt_entity))
                         ASKG.add((excerpt_entity, rel_mentions, entity))
@@ -480,12 +586,13 @@ def add_tnnt_ner_result(ASKG, paper_id, input_path_tnnt_result, section_dict, pa
 
     return ASKG
 
+
 def construct_KG_Paper_Section(ASKG, paper_id, paper_info, json_data):
 
     global rel_summary
     rel_summary = ASKG_namespace_onto.summary
 
-    #ASKG
+    # ASKG
     rel_id = ASKG_namespace_onto.id
 
     paper_title = paper_info["title"]
@@ -500,7 +607,6 @@ def construct_KG_Paper_Section(ASKG, paper_id, paper_info, json_data):
 
     ASKG.add((paper_entity, RDF.type, paper))
 
-
     paper_label = Literal(paper_label_str, lang="en")
     ASKG.add((paper_entity, RDFS.label, paper_label))
 
@@ -510,8 +616,8 @@ def construct_KG_Paper_Section(ASKG, paper_id, paper_info, json_data):
     ltr_paper_title = Literal(paper_info["title"], datatype=XSD.string)
     ASKG.add((paper_entity, DC.title, ltr_paper_title))
 
-    #add link
-    rel_link =  ASKG_namespace_onto.paperLink
+    # add link
+    rel_link = ASKG_namespace_onto.paperLink
     for link in paper_info["link"]:
         ltr_paper_link = Literal(link, datatype=XSD.string)
         ASKG.add((paper_entity, rel_link, ltr_paper_link))
@@ -524,7 +630,18 @@ def construct_KG_Paper_Section(ASKG, paper_id, paper_info, json_data):
     section_dict = {}
     for key in json_data["sections"].keys():
         # add section label
-        section_label = "Paper-" + f"[{paper_title}]" + "-" + f"[{first_author}]" + "-" + f"[{year}]" + " | " + "Section" + "-" + f"[{key}]"
+        section_label = (
+            "Paper-"
+            + f"[{paper_title}]"
+            + "-"
+            + f"[{first_author}]"
+            + "-"
+            + f"[{year}]"
+            + " | "
+            + "Section"
+            + "-"
+            + f"[{key}]"
+        )
         hashed_section = blake2s_hash(section_label)
         key_striped = key.replace(" ", "")
         sec = ASKG_namespace_data[f"{key_striped}-{hashed_section}"]
@@ -533,11 +650,19 @@ def construct_KG_Paper_Section(ASKG, paper_id, paper_info, json_data):
         ASKG.add((paper_entity, rel_hasSection, sec))
 
         # add section label
-        section_label = "Paper-" + f"[{paper_title}]" + "-" + f"[{first_author}]" + "-" +  f"[{year}]" + " | " + "Section" + "-" + f"[{key}]"
+        section_label = (
+            "Paper-"
+            + f"[{paper_title}]"
+            + "-"
+            + f"[{first_author}]"
+            + "-"
+            + f"[{year}]"
+            + " | "
+            + "Section"
+            + "-"
+            + f"[{key}]"
+        )
         ASKG.add((sec, RDFS.label, Literal(section_label, lang="en")))
-
-
-
 
         # add keywords part
         rel_similarity_score = ASKG_namespace_onto.similarityScore
@@ -548,15 +673,21 @@ def construct_KG_Paper_Section(ASKG, paper_id, paper_info, json_data):
             similarity_score = Literal(item[1], datatype=XSD.float)
             keywordOfSection_entity_str = section_label + keyword
             keywordOfSection_entity_hashed = blake2s_hash(keywordOfSection_entity_str)
-            keywordOfSection_entity = ASKG_namespace_data[f"KeywordOfSection-{keywordOfSection_entity_hashed}"]
+            keywordOfSection_entity = ASKG_namespace_data[
+                f"KeywordOfSection-{keywordOfSection_entity_hashed}"
+            ]
             ASKG.add((keywordOfSection_entity, RDF.type, KeywordOfSection))
             ASKG.add((keywordOfSection_entity, rel_similarity_score, similarity_score))
             ASKG.add((sec, rel_domo_keyword, keywordOfSection_entity))
             wikidata_entity_str, wikidata_entity_ID = get_wikidata_entity(keyword)
             if wikidata_entity_ID != 0:
-                keyword_str = quote(keyword.lower().replace(" ", "_"), safe='')  + "-" + str(wikidata_entity_ID)
+                keyword_str = (
+                    quote(keyword.lower().replace(" ", "_"), safe="")
+                    + "-"
+                    + str(wikidata_entity_ID)
+                )
             else:
-                keyword_str = quote(keyword.lower().replace(" ", "_"), safe='')
+                keyword_str = quote(keyword.lower().replace(" ", "_"), safe="")
             # keyword_hashed = blake2s_hash(keyword_str)
             keyword_entity = ASKG_namespace_data[f"Keyword-{keyword_str}"]
             wikidata_entity = WIKIDATA_namespace[f"{wikidata_entity_ID}"]
@@ -565,18 +696,20 @@ def construct_KG_Paper_Section(ASKG, paper_id, paper_info, json_data):
                 ASKG.add((keyword_entity, RDFS.label, Literal(keyword, lang="en")))
             if wikidata_entity_ID != 0:
                 if (wikidata_entity, None, None) not in ASKG:
-                    ASKG.add((wikidata_entity, RDFS.label, Literal(wikidata_entity_str, lang="en")))
+                    ASKG.add(
+                        (
+                            wikidata_entity,
+                            RDFS.label,
+                            Literal(wikidata_entity_str, lang="en"),
+                        )
+                    )
                 ASKG.add((keyword_entity, OWL.sameAs, wikidata_entity))
             ASKG.add((keywordOfSection_entity, rel_correspondsTo, keyword_entity))
-
-
-
 
         # add summary part
         summarization = json_data["summarization"][key]
         summarization = Literal(summarization, datatype=XSD.string)
         ASKG.add((sec, rel_summary, summarization))
-
 
     # # NER Part
     # if mode == "local":
@@ -590,31 +723,33 @@ def construct_KG_Paper_Section(ASKG, paper_id, paper_info, json_data):
     #         excerpt_result = json.load(excerpt_file)
     #     ASKG = construct_KG_Excerpt_Academic_Entity(ASKG, excerpt_result, paper_id, section_dict, paper_info)
 
-
-    #NEL
+    # NEL
     if mode == "local":
         input_path_excerpt = "../ASKG_Paper_Dataset/AcademicEntity"
     else:
         input_path_excerpt = "/home/users/u7274475/askg/anu-scholarly-kg/src/Papers/ASKG_Paper_Dataset/NEL_result"
 
-    #add excerpt part to ASKG
     # add excerpt part to ASKG
     excerpt_file_path = os.path.join(input_path_excerpt, paper_id + "_dict.json")
     if os.path.isfile(excerpt_file_path):
         with open(excerpt_file_path, "r") as excerpt_file:
             excerpt_result = json.load(excerpt_file)
-        ASKG = construct_KG_Excerpt_Academic_Entity(ASKG, excerpt_result, paper_id, section_dict, paper_info)
-
+        ASKG = construct_KG_Excerpt_Academic_Entity(
+            ASKG, excerpt_result, paper_id, section_dict, paper_info
+        )
 
     if mode == "ssh":
         input_path_tnnt_result = "/home/users/u7274475/askg/anu-scholarly-kg/src/Papers/ASKG_Paper_Dataset/MEL_TNNT_NER_Result"
     else:
         input_path_tnnt_result = "../ASKG_Paper_Dataset/MEL_TNNT_NER_Result"
 
-    #add TNNT part to ASKG
-    ASKG = add_tnnt_ner_result(ASKG, paper_id, input_path_tnnt_result, section_dict, paper_info)
+    # add TNNT part to ASKG
+    ASKG = add_tnnt_ner_result(
+        ASKG, paper_id, input_path_tnnt_result, section_dict, paper_info
+    )
 
     return ASKG
+
 
 def create_tnnt_list(input_path_tnnt_result):
 
@@ -629,6 +764,7 @@ def create_tnnt_list(input_path_tnnt_result):
 
             if match1:
                 tnnt_list.append(match1.group(1))
+
 
 if __name__ == "__main__":
     if mode == "ssh":
@@ -665,23 +801,19 @@ if __name__ == "__main__":
 
             ASKG = construct_KG_Paper_Section(ASKG, paper_id, paper_info, json_data)
 
-
-
-
-                # with open(wiki_dict_output_path, "w") as f:
-                #     json.dump(wiki_dict, f)
+            # with open(wiki_dict_output_path, "w") as f:
+            #     json.dump(wiki_dict, f)
 
             cnt += 1
             print(cnt)
 
-    rdf_ttl_data = ASKG.serialize(format='ttl')  # ttl
+    rdf_ttl_data = ASKG.serialize(format="ttl")  # ttl
     if mode == "ssh":
         output_path = f"/home/users/u7274475/askg/anu-scholarly-kg/src/Papers/RDF/ASKG_NEl_SUM_keyword_TNNT_new.ttl"
         wiki_dict_output_path = f"/home/users/u7274475/askg/anu-scholarly-kg/src/Papers/RDF/ASKG_{cnt}_wiki_dict_new.json"
 
         with open(output_path, "wb") as f:
             f.write(rdf_ttl_data.encode("utf-8"))
-
 
         with open(wiki_dict_output_path, "w") as f:
             json.dump(wiki_dict, f)
