@@ -267,6 +267,7 @@ def _citation_literal(raw: str, num_idx: Dict, ay_idx: Dict, existing: Dict) -> 
 # --------------------------------------------------------------------------- #
 # === generate_ttl（重写） =====================================================
 def generate_ttl(doc, output_file, paper_id, md_content, existing_papers=None):
+    print(f"  - Generating TTL for paper: {paper_id}")
     g = Graph()
     for p, ns in [("askg-data", ASKG_DATA), ("askg-onto", ASKG_ONTO), ("domo", DOMO)]:
         g.bind(p, ns)
@@ -395,32 +396,59 @@ def generate_ttl(doc, output_file, paper_id, md_content, existing_papers=None):
                         g.add((sec_uri, has_cit_p, Literal(lit)))
                         sec_cits.add(lit)
 
-                # 保留实体抽取
+                # 添加句子文本
+                g.add((sent_uri, in_sent_p, Literal(s_txt, datatype=XSD.string)))
+
+                # 实体抽取（可选，如果失败则跳过）
                 try:
-                    ents, has_ents = utils.get_entities(s_txt)
-                    g.add((sent_uri, in_sent_p, Literal(s_txt, datatype=XSD.string)))
-                    if has_ents:
-                        for e in ents:
-                            if e.head_type in MEANINGFUL_TYPES:
-                                h_uri = URIRef(
-                                    ASKG_DATA + f"Entity-{_clean_uri(e.head)}"
+                    if ENABLE_ENTITY_EXTRACTION:
+                        print(f"    🔍 Extracting entities from sentence: {sid_full}")
+                        print(
+                            f"       Text: {s_txt[:100]}{'...' if len(s_txt) > 100 else ''}"
+                        )
+                        ents, has_ents = utils.get_entities(s_txt)
+                        if has_ents:
+                            print(f"    ✓ Found {len(ents)} entities:")
+                            for i, e in enumerate(ents, 1):
+                                print(
+                                    f"      {i}. {e.head} ({e.head_type}) --{e.relation}--> {e.tail} ({e.tail_type})"
                                 )
-                                g.add((sent_uri, mentions_p, h_uri))
-                                g.add((h_uri, RDFS.label, Literal(e.head, lang="en")))
-                                g.add(
-                                    (h_uri, ent_type_p, Literal(e.head_type, lang="en"))
-                                )
-                            if e.tail_type in MEANINGFUL_TYPES:
-                                t_uri = URIRef(
-                                    ASKG_DATA + f"Entity-{_clean_uri(e.tail)}"
-                                )
-                                g.add((sent_uri, mentions_p, t_uri))
-                                g.add((t_uri, RDFS.label, Literal(e.tail, lang="en")))
-                                g.add(
-                                    (t_uri, ent_type_p, Literal(e.tail_type, lang="en"))
-                                )
+                                if e.head_type in MEANINGFUL_TYPES:
+                                    h_uri = URIRef(
+                                        ASKG_DATA + f"Entity-{_clean_uri(e.head)}"
+                                    )
+                                    g.add((sent_uri, mentions_p, h_uri))
+                                    g.add(
+                                        (h_uri, RDFS.label, Literal(e.head, lang="en"))
+                                    )
+                                    g.add(
+                                        (
+                                            h_uri,
+                                            ent_type_p,
+                                            Literal(e.head_type, lang="en"),
+                                        )
+                                    )
+                                if e.tail_type in MEANINGFUL_TYPES:
+                                    t_uri = URIRef(
+                                        ASKG_DATA + f"Entity-{_clean_uri(e.tail)}"
+                                    )
+                                    g.add((sent_uri, mentions_p, t_uri))
+                                    g.add(
+                                        (t_uri, RDFS.label, Literal(e.tail, lang="en"))
+                                    )
+                                    g.add(
+                                        (
+                                            t_uri,
+                                            ent_type_p,
+                                            Literal(e.tail_type, lang="en"),
+                                        )
+                                    )
+                        else:
+                            print(f"    - No entities found in this sentence")
                 except Exception as e:
-                    print("Entity extraction error:", e)
+                    print(
+                        f"    Warning: Entity extraction failed for sentence (continuing without entities): {str(e)[:100]}"
+                    )
 
     g.serialize(destination=output_file, format="turtle")
     print("✓ TTL saved:", output_file)
@@ -429,33 +457,73 @@ def generate_ttl(doc, output_file, paper_id, md_content, existing_papers=None):
 # --------------------------------------------------------------------------- #
 # 其余流程保持不变 -------------------------------------------------------------
 def process_markdown_file(input_file, output_ttl, paper_id=None, existing_papers=None):
+    print(f"  - Reading file: {input_file}")
     with open(input_file, "r", encoding="utf-8") as f:
         md_content = f.read()
+    print(f"  - File size: {len(md_content)} characters")
+
     if paper_id is None:
         paper_id = os.path.splitext(os.path.basename(input_file))[0]
+
+    print(f"  - Building document structure...")
     doc = build_document_structure(md_content)
+
+    print(f"  - Generating TTL file: {output_ttl}")
     generate_ttl(doc, output_ttl, paper_id, md_content, existing_papers)
 
 
 def process_all_markdown_files(input_dir="./markdown", output_dir="./output"):
+    print(f"Creating output directory: {output_dir}")
     os.makedirs(output_dir, exist_ok=True)
+
+    print(f"Checking for markdown files in: {input_dir}")
+    if not os.path.exists(input_dir):
+        print(f"Error: Input directory {input_dir} does not exist!")
+        return
+
     md_files = [f for f in os.listdir(input_dir) if f.endswith(".md")]
+    print(f"Found {len(md_files)} markdown files")
+
     if not md_files:
         print(f"No markdown files found in {input_dir}")
         return
-    for md_file in md_files:
+
+    for i, md_file in enumerate(md_files, 1):
+        print(f"Processing file {i}/{len(md_files)}: {md_file}")
         in_path = os.path.join(input_dir, md_file)
         out_path = os.path.join(output_dir, f"{os.path.splitext(md_file)[0]}.ttl")
-        process_markdown_file(in_path, out_path)
+        try:
+            process_markdown_file(in_path, out_path)
+            print(f"✓ Successfully processed: {md_file}")
+        except Exception as e:
+            print(f"✗ Error processing {md_file}: {str(e)}")
+            import traceback
+
+            traceback.print_exc()
 
 
 # --------------------------------------------------------------------------- #
 if __name__ == "__main__":
+    # 检查OpenAI API配置
+    print("Checking OpenAI API configuration...")
+    if not os.environ.get("OPENAI_API_KEY"):
+        print("Warning: OPENAI_API_KEY not found in environment variables.")
+        print("Entity extraction will be skipped if it fails.")
+        print("To enable entity extraction, set your OpenAI API key:")
+        print("export OPENAI_API_KEY='your-api-key-here'")
+        print()
+    else:
+        print("✓ OpenAI API key found")
+        print()
+
     # 设置默认的输入和输出目录
     input_dir = "./markdown/test"
-    output_dir = "./output"
+    output_dir = "./output/test"
 
     print(f"Processing markdown files from: {input_dir}")
     print(f"Output TTL files to: {output_dir}")
+
+    # Entity extraction toggle (set environment variable ENABLE_ENTITY_EXTRACTION=1 to enable)
+    ENABLE_ENTITY_EXTRACTION = os.environ.get("ENABLE_ENTITY_EXTRACTION", "1") == "1"
 
     process_all_markdown_files(input_dir, output_dir)
