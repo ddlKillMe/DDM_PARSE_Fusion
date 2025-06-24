@@ -174,3 +174,5 @@ code/PARSE/Papers/Pipeline/markdown
 code/PARSE/Papers/Pipeline/papers
 code/PARSE/test
 code/PARSE/Papers/Pipeline/output/
+code/PARSE/Papers/Pipeline/output.zip
+code/PARSE/Papers/Pipeline/merged_knowledge_graph.ttl
