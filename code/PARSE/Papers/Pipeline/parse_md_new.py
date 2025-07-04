@@ -87,72 +87,105 @@ MEANINGFUL_TYPES = {
 
 # --------------------------------------------------------------------------- #
 # === 引用 / 参考文献辅助 ======================================================
-_ref_head_pat = re.compile(
+# 使用第一段代码的正则表达式和逻辑
+_ref_heading_pat = re.compile(
     r"^(#{1,6})\s*(references?|bibliography|works\s+cited)\s*$", re.I | re.M
 )
-_ref_line_lead = re.compile(r"^\s*(\[\d+\]|\d+[.)])\s*")
-_num_pat = re.compile(
-    r"\[(\d+(?:\s*[\u2013\u2014\-]\s*\d+)?(?:\s*,\s*\d+(?:\s*[\u2013\u2014\-]\s*\d+)?)*)\]"
+
+_ref_pat = re.compile(r"""
+    ^\s*
+    (?P<lead>\[\d+\]|\d+[.)])?\s*      # [12]  或 12.
+    (?P<authors>.+?)                   # 作者串（贪婪到年份前）
+    \s*\(\s*(?P<year>\d{4})\s*\)\.     # (2023).
+    \s*
+    (?P<title>[^.]+?\.)                # 标题直到下一个句点
+""", re.X)
+
+_lead_num_pat = re.compile(r"\s*(?:\[(?P<num>\d+)\]|(?P<num2>\d+)[.)])")
+
+_num_pat = re.compile(r"\[(\d+(?:[\u2013\u2014\-]\d+)?(?:,\s*\d+(?:[\u2013\u2014\-]\d+)?)*)\]")
+_auth_pat = re.compile(
+    r"(?:^|\W)([A-Z][A-Za-z\-]+)(?:\s+et\s+al)?(?:\s+and\s+[A-Z][A-Za-z\-]+)?\s*(?:,|\(|\s)(\d{4})(?:\)|\b)"
 )
-_auth_pat = re.compile(r"(?:^|\W)([A-Z][A-Za-z\-]+).*?(\d{4})")
 
-
-def _expand_range(tok: str) -> List[str]:
-    if re.search(r"[\u2013\u2014\-]", tok):
-        a, b = re.split(r"[\u2013\u2014\-]", tok)
-        return [str(i) for i in range(int(a), int(b) + 1)]
-    return [tok]
-
+def _expand_num(tok: str) -> List[str]:
+    out = []
+    for seg in tok.split(','):
+        seg = seg.strip()
+        if re.search(r"[\u2013\u2014\-]", seg):
+            a, b = re.split(r"[\u2013\u2014\-]", seg)
+            out.extend(map(str, range(int(a), int(b) + 1)))
+        else:
+            out.append(seg)
+    return out
 
 def extract_citations(text: str) -> List[str]:
     cites, seen = [], set()
     for m in _num_pat.finditer(text):
-        for part in m.group(1).split(","):
-            part = part.strip()
-            for n in _expand_range(part):
-                if n not in seen:
-                    cites.append(n)
-                    seen.add(n)
+        for n in _expand_num(m.group(1)):
+            if n not in seen:
+                cites.append(n); seen.add(n)
     for m in _auth_pat.finditer(text):
         key = f"{m.group(1).lower()}_{m.group(2)}"
         if key not in seen:
-            cites.append(key)
-            seen.add(key)
+            cites.append(key); seen.add(key)
     return cites
 
-
 def extract_reference_block(md: str) -> str:
-    for m in _ref_head_pat.finditer(md):
-        start_line_end = md.find("\n", m.start())
-        if start_line_end == -1:
-            start_line_end = len(md)
-        rest = md[start_line_end + 1 :]
-        nxt = re.search(r"^#{1,6}\s", rest, re.M)
-        end = start_line_end + 1 + (nxt.start() if nxt else len(rest))
-        return md[start_line_end + 1 : end].strip()
+    for m in _ref_heading_pat.finditer(md):
+        start = md.find("\n", m.start())
+        rest  = md[start + 1:] if start != -1 else ""
+        nxt   = re.search(r"^#{1,6}\s", rest, re.M)
+        end   = start + 1 + (nxt.start() if nxt else len(rest))
+        return md[start + 1:end].strip()
     return ""
 
+def _first_surname(authors: str) -> str:
+    # 逗号优先
+    if ',' in authors:
+        return authors.split(',')[0].strip().split()[0]
+    parts = authors.strip().split()
+    return parts[0] if len(parts) == 1 else parts[-1]
 
 def parse_reference_lines(block: str) -> List[Dict]:
-    refs = []
-    for ln in block.splitlines():
-        ln = ln.strip()
-        if not ln:
-            continue
-        idx = None
-        m = _ref_line_lead.match(ln)
-        if m:
-            idx = re.sub(r"[^\d]", "", m.group(1))
-            ln = ln[m.end() :].strip()
-        m_year = re.search(r"\((\d{4})\)", ln)
-        year = m_year.group(1) if m_year else ""
-        before = ln[: m_year.start()].strip() if m_year else ln
-        after = ln[m_year.end() :].strip() if m_year else ""
-        authors = before.rstrip(".")
-        title = after.split(".")[0].strip() or after
-        refs.append({"idx": idx, "authors": authors, "year": year, "title": title})
-    return refs
+    """
+    将参考文献块拆分为行并解析。
+    - 无论正则是否完全匹配，都尽量提取行首编号，填充到 idx 字段。
+    - 其余字段缺失时留空，避免后续 KeyError。
+    """
+    refs: List[Dict] = []
 
+    # 按换行或 <br/> 拆分
+    for raw in re.split(r'(?:\n|<br\s*/?>)+', block):
+        raw = raw.strip()
+        if not raw:
+            continue
+
+        # 1) 先抓行首编号
+        lead_m = _lead_num_pat.match(raw)
+        idx_num = (lead_m.group("num") or lead_m.group("num2")) if lead_m else None
+
+        # 2) 再用完整正则解析
+        m = _ref_pat.match(raw)
+        if m:                                   # 成功解析
+            d = m.groupdict()
+            refs.append({
+                "idx":     idx_num or re.sub(r"[^\d]", "", d.get("lead") or "") or None,
+                "authors": (d.get("authors") or "").strip(" ."),
+                "year":    d.get("year") or "",
+                "title":   (d.get("title") or "").strip(),
+                "raw":     raw
+            })
+        else:                                  # 解析失败：至少保留 idx 与原始行
+            refs.append({
+                "idx":     idx_num,             # 可能是 None
+                "authors": "",
+                "year":    "",
+                "title":   "",
+                "raw":     raw
+            })
+
+    return refs
 
 # --------------------------------------------------------------------------- #
 # === 原清洗/分段/分句函数 =====================================================
@@ -243,35 +276,20 @@ def _clean_uri(text: str, max_len: int = 80) -> str:
     base = quote(base)[:max_len]
     return base or md5(text.encode()).hexdigest()[:12]
 
-
-def _citation_literal(raw: str, num_idx: Dict, ay_idx: Dict, existing: Dict) -> str:
-    if raw.isdigit():
-        ref = num_idx.get(raw)
-        if not ref:
-            return f"[{raw}]"
-    else:
-        ref = ay_idx.get(raw)
-        if not ref:
-            return raw.replace("_", " ")
-    pid = None
-    for k, info in existing.items():
-        if info["title"].lower() == ref["title"].lower() and info.get(
-            "year"
-        ) == ref.get("year"):
-            pid = k
-            break
-    title, authors = ref["title"], ref["authors"]
-    return f"{pid} ⟂ {title} ⟂ {authors}" if pid else f"{title} ⟂ {authors}"
-
+# 使用第一段代码的简化逻辑
+def clean_uri(t: str, limit=80) -> str:
+    base = re.sub(r"[^\w\s-]", "", t).lower().replace(" ", "_")
+    return quote(base)[:limit] or md5(t.encode()).hexdigest()[:12]
 
 # --------------------------------------------------------------------------- #
-# === generate_ttl（重写） =====================================================
+# === generate_ttl（使用第一段代码的引用处理逻辑）===============================
 def generate_ttl(doc, output_file, paper_id, md_content, existing_papers=None):
     print(f"  - Generating TTL for paper: {paper_id}")
     g = Graph()
     for p, ns in [("askg-data", ASKG_DATA), ("askg-onto", ASKG_ONTO), ("domo", DOMO)]:
         g.bind(p, ns)
     g.bind("rdfs", RDFS)
+    g.bind("dc", DC)
     g.bind("xsd", XSD)
 
     # Predicates
@@ -282,119 +300,103 @@ def generate_ttl(doc, output_file, paper_id, md_content, existing_papers=None):
     mentions_p = URIRef(ASKG_ONTO + "mentions")
     in_sent_p = URIRef(ASKG_ONTO + "inSentence")
     ent_type_p = URIRef(ASKG_ONTO + "entityType")
+    author_p = URIRef(ASKG_ONTO + "author")
 
-    clean_pid = _clean_uri(paper_id)
-    paper_uri = URIRef(ASKG_DATA + f"Paper-{clean_pid}")
-    paper_title = next(
-        (ln[2:].strip() for ln in md_content.splitlines() if ln.startswith("# ")),
-        paper_id,
-    )
+    # ---- Paper ----
+    paper_uri   = URIRef(ASKG_DATA + f"Paper-{clean_uri(paper_id)}")
+    paper_title = next((l[2:].strip() for l in md_content.splitlines() if l.startswith("# ")), paper_id)
     g.add((paper_uri, RDF.type, ASKG_ONTO.Paper))
-    g.add((paper_uri, DC.title, Literal(paper_title, lang="en")))
+    g.add((paper_uri, DC.title,  Literal(paper_title, lang="en")))
     g.add((paper_uri, RDFS.label, Literal(paper_title, lang="en")))
 
-    # 引用索引
-    num_idx, ay_idx = {}, {}
-    for r in parse_reference_lines(extract_reference_block(md_content)):
-        if r["idx"]:
-            num_idx[r["idx"]] = r
-        if r["authors"] and r["year"]:
-            key = f"{r['authors'].split(',')[0].split()[-1].lower()}_{r['year']}"
-            ay_idx[key] = r
-    existing_papers = existing_papers or {}
+    # ---- References ----
+    ref_block = extract_reference_block(md_content)
+    refs      = parse_reference_lines(ref_block)
+    num_idx: Dict[str, URIRef] = {}
+    ay_idx:  Dict[str, URIRef] = {}
 
-    # 遍历 XML
+    for i, ref in enumerate(refs, 1):
+        ref_uri = URIRef(ASKG_DATA + f"Paper-{clean_uri(paper_id)}-Reference-{i}")
+        g.add((ref_uri, RDF.type, ASKG_ONTO.Reference))
+        g.add((ref_uri, RDFS.label, Literal(f"Reference {i}", lang="en")))
+        g.add((ref_uri, DOMO.Text, Literal(ref["raw"], lang="en")))
+
+        # ★ 使用 .get() 并确保字段存在
+        authors = ref.get("authors", "")
+        year    = ref.get("year", "")
+
+        if re.search(r"[A-Za-z]", authors):
+            g.add((ref_uri, author_p, Literal(authors, lang="en")))
+            if year:
+                g.add((ref_uri, DC.date, Literal(year, datatype=XSD.gYear)))
+                surname = _first_surname(authors).lower()
+                ay_idx[f"{surname}_{year}"] = ref_uri
+
+        idx_num = ref.get("idx")
+        if idx_num:
+            num_idx[idx_num] = ref_uri
+
+    # ---- Walk XML ----
     for sec in doc.findall("./section"):
-        sid = sec.get("ID")
-        sec_uri = URIRef(ASKG_DATA + f"Paper-{clean_pid}-Section-{sid}")
+        sid     = sec.get("ID")
+        sec_uri = URIRef(ASKG_DATA + f"Paper-{clean_uri(paper_id)}-Section-{sid}")
         g.add((sec_uri, RDF.type, ASKG_ONTO.Section))
         g.add((paper_uri, ASKG_ONTO.hasSection, sec_uri))
         g.add((sec_uri, RDFS.label, Literal(f"Section {sid}", lang="en")))
-        g.add((sec_uri, idx_p, Literal(sid, datatype=XSD.int)))
-        g.add((sec_uri, lvl_p, Literal(sec.get("level"), datatype=XSD.int)))
-        g.add(
-            (
-                sec_uri,
-                n_sent_p,
-                Literal(sec.get(NUMBER_OF_SENTENCES), datatype=XSD.positiveInteger),
-            )
-        )
-        hd = sec.find("heading")
-        if hd is not None:
-            g.add((sec_uri, DOMO.Text, Literal(hd.text, lang="en")))
+        g.add((sec_uri, idx_p,  Literal(sid, datatype=XSD.int)))
+        g.add((sec_uri, lvl_p,  Literal(sec.get("level"), datatype=XSD.int)))
+        g.add((sec_uri, n_sent_p, Literal(sec.get(NUMBER_OF_SENTENCES), datatype=XSD.positiveInteger)))
+        hd = sec.find("heading");  hd_text = hd.text if hd is not None else ""
+        g.add((sec_uri, DOMO.Text, Literal(hd_text, lang="en")))
 
-        sec_cits: Set[str] = set()
+        sec_seen: Set[URIRef] = set()
 
         for para in sec.findall("paragraph"):
-            pid = para.get("ID")
-            para_uri = URIRef(
-                ASKG_DATA
-                + f"Paper-{clean_pid}-Section-{sid}-Paragraph-{_clean_uri(pid)}"
-            )
+            pid      = para.get("ID")
+            para_uri = URIRef(ASKG_DATA + f"Paper-{clean_uri(paper_id)}-Section-{sid}-Paragraph-{clean_uri(pid)}")
             g.add((para_uri, RDF.type, ASKG_ONTO.Paragraph))
             g.add((sec_uri, ASKG_ONTO.hasParagraph, para_uri))
-            g.add(
-                (
-                    para_uri,
-                    RDFS.label,
-                    Literal(f"Paragraph {para.get('index')}", lang="en"),
-                )
-            )
-            g.add((para_uri, idx_p, Literal(para.get("index"), datatype=XSD.int)))
-            g.add(
-                (
-                    para_uri,
-                    n_sent_p,
-                    Literal(
-                        para.get(NUMBER_OF_SENTENCES), datatype=XSD.positiveInteger
-                    ),
-                )
-            )
-            p_txt_el = para.find("text")
-            if p_txt_el is not None:
-                g.add((para_uri, DOMO.Text, Literal(p_txt_el.text, lang="en")))
-            para_cits: Set[str] = set()
+            g.add((para_uri, RDFS.label, Literal(f"Paragraph {para.get('index')}", lang="en")))
+            g.add((para_uri, idx_p,  Literal(para.get("index"), datatype=XSD.int)))
+            g.add((para_uri, n_sent_p, Literal(para.get(NUMBER_OF_SENTENCES), datatype=XSD.positiveInteger)))
+            p_txt = para.findtext("text", "")
+            g.add((para_uri, DOMO.Text, Literal(p_txt, lang="en")))
 
-            # 段落引用
-            for cit_el in para.findall("citation"):
-                lit = _citation_literal(cit_el.text, num_idx, ay_idx, existing_papers)
-                if lit not in para_cits:
-                    g.add((para_uri, has_cit_p, Literal(lit)))
-                    para_cits.add(lit)
-                if lit not in sec_cits:
-                    g.add((sec_uri, has_cit_p, Literal(lit)))
-                    sec_cits.add(lit)
+            para_seen: Set[URIRef] = set()
+
+            def _cite(token: str):
+                if token.isdigit():
+                    return num_idx.get(token)
+                return ay_idx.get(token.lower())
+
+            for tok in [c.text for c in para.findall("citation")]:
+                obj = _cite(tok) or Literal(tok.replace("_", " "))
+                if obj not in para_seen:
+                    g.add((para_uri, has_cit_p, obj)); para_seen.add(obj)
+                if obj not in sec_seen:
+                    g.add((sec_uri, has_cit_p, obj));  sec_seen.add(obj)
 
             for sent in para.findall("sentence"):
-                sid_full = sent.get("ID")
+                s_id     = sent.get("ID")
                 sent_uri = URIRef(
-                    ASKG_DATA
-                    + f"Paper-{clean_pid}-Section-{sid}-Paragraph-{_clean_uri(pid)}-Sentence-{_clean_uri(sid_full)}"
-                )
+                    ASKG_DATA +
+                    f"Paper-{clean_uri(paper_id)}-Section-{sid}-Paragraph-{clean_uri(pid)}-Sentence-{clean_uri(s_id)}")
                 g.add((sent_uri, RDF.type, ASKG_ONTO.Sentence))
                 g.add((para_uri, ASKG_ONTO.hasSentence, sent_uri))
-                g.add(
-                    (
-                        sent_uri,
-                        RDFS.label,
-                        Literal(f"Sentence {sent.get('index')}", lang="en"),
-                    )
-                )
-                g.add((sent_uri, idx_p, Literal(sent.get("index"), datatype=XSD.int)))
-                s_txt = sent.find("text").text
+                g.add((sent_uri, RDFS.label, Literal(f"Sentence {sent.get('index')}", lang="en")))
+                g.add((sent_uri, idx_p, Literal(sent.get('index'), datatype=XSD.int)))
+                s_txt = sent.findtext("text")
                 g.add((sent_uri, DOMO.Text, Literal(s_txt, lang="en")))
 
-                for cit_el in sent.findall("citation"):
-                    lit = _citation_literal(
-                        cit_el.text, num_idx, ay_idx, existing_papers
-                    )
-                    if lit not in para_cits:
-                        g.add((sent_uri, has_cit_p, Literal(lit)))
-                        g.add((para_uri, has_cit_p, Literal(lit)))
-                        para_cits.add(lit)
-                    if lit not in sec_cits:
-                        g.add((sec_uri, has_cit_p, Literal(lit)))
-                        sec_cits.add(lit)
+                sent_seen: Set[URIRef] = set()
+                for tok in [c.text for c in sent.findall("citation")]:
+                    obj = _cite(tok) or Literal(tok.replace("_", " "))
+                    if obj not in sent_seen:
+                        g.add((sent_uri, has_cit_p, obj));   sent_seen.add(obj)
+                    if obj not in para_seen:
+                        g.add((para_uri, has_cit_p, obj));   para_seen.add(obj)
+                    if obj not in sec_seen:
+                        g.add((sec_uri, has_cit_p, obj));    sec_seen.add(obj)
 
                 # 添加句子文本
                 g.add((sent_uri, in_sent_p, Literal(s_txt, datatype=XSD.string)))
@@ -402,7 +404,7 @@ def generate_ttl(doc, output_file, paper_id, md_content, existing_papers=None):
                 # 实体抽取（可选，如果失败则跳过）
                 try:
                     if ENABLE_ENTITY_EXTRACTION:
-                        print(f"    🔍 Extracting entities from sentence: {sid_full}")
+                        print(f"    🔍 Extracting entities from sentence: {s_id}")
                         print(
                             f"       Text: {s_txt[:100]}{'...' if len(s_txt) > 100 else ''}"
                         )
@@ -415,7 +417,7 @@ def generate_ttl(doc, output_file, paper_id, md_content, existing_papers=None):
                                 )
                                 if e.head_type in MEANINGFUL_TYPES:
                                     h_uri = URIRef(
-                                        ASKG_DATA + f"Entity-{_clean_uri(e.head)}"
+                                        ASKG_DATA + f"Entity-{clean_uri(e.head)}"
                                     )
                                     g.add((sent_uri, mentions_p, h_uri))
                                     g.add(
@@ -430,7 +432,7 @@ def generate_ttl(doc, output_file, paper_id, md_content, existing_papers=None):
                                     )
                                 if e.tail_type in MEANINGFUL_TYPES:
                                     t_uri = URIRef(
-                                        ASKG_DATA + f"Entity-{_clean_uri(e.tail)}"
+                                        ASKG_DATA + f"Entity-{clean_uri(e.tail)}"
                                     )
                                     g.add((sent_uri, mentions_p, t_uri))
                                     g.add(
