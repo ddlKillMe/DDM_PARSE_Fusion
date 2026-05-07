@@ -8,7 +8,10 @@ md2ttl_v3_fullname.py  –  Markdown → Turtle  (full URI names)
     OUTPUT_DIR = /home/rujia/Data/marker
 """
 
-import os, re, html, argparse
+import os
+import re
+import html
+import argparse
 from hashlib import md5
 from urllib.parse import quote
 import xml.etree.ElementTree as ET
@@ -25,7 +28,7 @@ OUTPUT_DIR = r"/home/rujia/Data/marker"
 # ---------- 命名空间 & 本体常量 ----------------------------------------------
 ASKG_DATA = Namespace("https://www.anu.edu.au/data/scholarly/")
 ASKG_ONTO = Namespace("https://www.anu.edu.au/onto/scholarly#")
-DOMO = Namespace("http://example.org/domo/")
+DOMO = Namespace("http://data.anu.edu.au/def/ont/domo#")
 
 NUMBER_OF_SENTENCES = "numberOfSentences"
 HAS_CITATION = "hasCitation"
@@ -46,10 +49,10 @@ def extract_reference_block(md: str) -> str:
         start = md.find("\n", m.start())
         if start == -1:
             start = len(md)
-        rest = md[start + 1 :]
+        rest = md[start + 1:]
         nxt = re.search(r"^#{1,6}\s", rest, re.M)
         end = start + 1 + (nxt.start() if nxt else len(rest))
-        return md[start + 1 : end].strip()
+        return md[start + 1: end].strip()
     return ""
 
 
@@ -66,15 +69,16 @@ def parse_reference_lines(block: str) -> List[Dict]:
         m = _ref_line_lead_pat.match(ln)
         if m:
             idx = re.sub(r"[^\d]", "", m.group(1))
-            ln = ln[m.end() :].strip()
+            ln = ln[m.end():].strip()
 
         m_year = re.search(r"\((\d{4})\)", ln)
         year = m_year.group(1) if m_year else ""
         before = ln[: m_year.start()].strip() if m_year else ln
-        after = ln[m_year.end() :].strip() if m_year else ""
+        after = ln[m_year.end():].strip() if m_year else ""
         authors = before.rstrip(".")
         title = after.split(".")[0].strip() or after
-        refs.append({"idx": idx, "authors": authors, "year": year, "title": title})
+        refs.append({"idx": idx, "authors": authors,
+                    "year": year, "title": title})
     return refs
 
 
@@ -145,8 +149,12 @@ def clean_text(t: str) -> str:
     return re.sub(r"\s+", " ", t).strip()
 
 
-split_paragraphs = lambda c: [p.strip() for p in re.split(r"\n\s*\n", c) if p.strip()]
-split_sentences = lambda p: [s for s in re.split(r"(?<=[.!?])\s+", clean_text(p)) if s]
+def split_paragraphs(c): return [p.strip()
+                                 for p in re.split(r"\n\s*\n", c) if p.strip()]
+
+
+def split_sentences(p): return [s for s in re.split(
+    r"(?<=[.!?])\s+", clean_text(p)) if s]
 
 
 def build_xml(md: str) -> ET.Element:
@@ -216,7 +224,8 @@ def generate_ttl(xml_root: ET.Element, md: str, out: str, paper_id: str, existin
 
     paper_uri = URIRef(ASKG_DATA + f"Paper-{clean_uri(paper_id)}")
     paper_title = next(
-        (ln[2:].strip() for ln in md.splitlines() if ln.startswith("# ")), paper_id
+        (ln[2:].strip()
+         for ln in md.splitlines() if ln.startswith("# ")), paper_id
     )
     g.add((paper_uri, RDF.type, ASKG_ONTO.Paper))
     g.add((paper_uri, DC.title, Literal(paper_title, lang="en")))
@@ -233,7 +242,8 @@ def generate_ttl(xml_root: ET.Element, md: str, out: str, paper_id: str, existin
 
     for sec in xml_root.findall("./section"):
         sec_id = sec.get("ID")
-        sec_uri = URIRef(ASKG_DATA + f"Paper-{clean_uri(paper_id)}-Section-{sec_id}")
+        sec_uri = URIRef(
+            ASKG_DATA + f"Paper-{clean_uri(paper_id)}-Section-{sec_id}")
         g.add((sec_uri, RDF.type, ASKG_ONTO.Section))
         g.add((paper_uri, ASKG_ONTO.hasSection, sec_uri))
         g.add((sec_uri, RDFS.label, Literal(f"Section {sec_id}", lang="en")))
@@ -243,7 +253,8 @@ def generate_ttl(xml_root: ET.Element, md: str, out: str, paper_id: str, existin
             (
                 sec_uri,
                 n_sent_p,
-                Literal(sec.get("numberOfSentences"), datatype=XSD.positiveInteger),
+                Literal(sec.get("numberOfSentences"),
+                        datatype=XSD.positiveInteger),
             )
         )
         hd = sec.find("heading")
@@ -297,7 +308,8 @@ def generate_ttl(xml_root: ET.Element, md: str, out: str, paper_id: str, existin
                         Literal(f"Sentence {sent.get('index')}", lang="en"),
                     )
                 )
-                g.add((sent_uri, index_p, Literal(sent.get("index"), datatype=XSD.int)))
+                g.add((sent_uri, index_p, Literal(
+                    sent.get("index"), datatype=XSD.int)))
                 stext = sent.find("text").text
                 g.add((sent_uri, DOMO.Text, Literal(stext, lang="en")))
                 for mark in extract_citations(stext):

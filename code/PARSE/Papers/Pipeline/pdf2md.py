@@ -13,7 +13,7 @@ def generate_filename_hash(filename):
     hash_object = hashlib.blake2b(filename.encode(), digest_size=8)
     return hash_object.hexdigest()
 
-def convert_pdfs_to_markdown(input_dir, output_dir):
+def  convert_pdfs_to_markdown(input_dir, output_dir):
     """
     Convert all PDF files in the input directory to Markdown format with hashed filenames
     Skip files that have already been converted

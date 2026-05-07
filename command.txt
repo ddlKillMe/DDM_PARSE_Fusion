@@ -1,0 +1,1 @@
+marker_single dataset_claim_network_pdfs/1210.5644.pdf --output_dir md_out --use_llm --llm_service=marker.services.openai.OpenAIService --openai_base_url "https://dashscope.aliyuncs.com/compatible-mode/v1" --openai_api_key "sk-34c73d911fa24012a454f7a0b77fefd6" --openai_model "qwen3-max"
